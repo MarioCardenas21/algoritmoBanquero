@@ -1,0 +1,336 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Demo: Caso del Banquero (Evitar Interbloqueos)</title>
+  <style>
+    :root{--bg:#0f172a;--fg:#e5e7eb;--muted:#94a3b8;--card:#111827;--accent:#22d3ee;--ok:#10b981;--warn:#f59e0b;--err:#ef4444;}
+    *{box-sizing:border-box;font-family:system-ui,-apple-system,Segoe UI,Roboto,Inter,Ubuntu,Arial,sans-serif}
+    body{margin:0;background:linear-gradient(180deg,#0b1220,#0a0f1a);color:var(--fg)}
+    header{padding:20px 16px;border-bottom:1px solid #1f2937;background:#0b1220;position:sticky;top:0;z-index:10}
+    h1{margin:0;font-size:20px;letter-spacing:.2px}
+    main{max-width:1100px;margin:20px auto;padding:0 16px 48px}
+    .grid{display:grid;gap:16px}
+    @media (min-width:900px){.grid{grid-template-columns:1.2fr 1fr}}
+    .card{background:var(--card);border:1px solid #1f2937;border-radius:16px;box-shadow:0 10px 30px rgba(0,0,0,.35)}
+    .card h2{margin:0;padding:16px;border-bottom:1px solid #1f2937;font-size:16px;color:#cbd5e1}
+    .card .body{padding:16px}
+    label{display:block;margin:.5rem 0 .35rem;color:#cbd5e1;font-size:14px}
+    input,textarea,select{width:100%;padding:10px 12px;border-radius:12px;background:#0b1220;border:1px solid #233047;color:var(--fg)}
+    textarea{min-height:86px;resize:vertical;font-family:ui-monospace,Consolas,Monaco,monospace}
+    .row{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+    .btns{display:flex;flex-wrap:wrap;gap:10px;margin-top:8px}
+    button{appearance:none;border:0;border-radius:12px;padding:10px 14px;cursor:pointer;font-weight:600}
+    .primary{background:var(--accent);color:#062025}
+    .ghost{background:#0b1220;border:1px solid #21334a;color:#cbd5e1}
+    .ok{background:var(--ok);color:#052014}
+    .warn{background:var(--warn);color:#1d1204}
+    .err{background:var(--err);color:#2b0a0a}
+    .muted{color:var(--muted)}
+    .mono{font-family:ui-monospace,Consolas,Monaco,monospace;font-size:13px}
+    .pill{display:inline-flex;align-items:center;gap:8px;padding:6px 10px;border-radius:999px;background:#0b1220;border:1px solid #293548}
+    .stack{display:flex;flex-direction:column;gap:8px}
+    .table{width:100%;border-collapse:collapse;border:1px solid #223049;border-radius:12px;overflow:hidden}
+    .table th,.table td{border-bottom:1px solid #223049;padding:8px 10px;text-align:center}
+    .table th{background:#0b1220;color:#cbd5e1}
+    .hint{font-size:12px;color:#9aa9bd}
+    .logs{white-space:pre-wrap;background:#0b1220;border:1px solid #233047;border-radius:12px;padding:12px;min-height:120px}
+    .footer{margin-top:16px;color:#9aa9bd;font-size:12px}
+    .kbd{border:1px solid #2a3a52;border-bottom-width:2px;border-radius:6px;padding:1px 6px;font-family:ui-monospace,Consolas,Monaco,monospace}
+  </style>
+</head>
+<body>
+  <header>
+    <h1>💳 Caso del Banquero — Prueba interactiva</h1>
+    <div class="muted" style="margin-top:6px;font-size:13px">Ingresa matrices y verifica si el sistema está en <b>estado seguro</b>. También puedes simular una <b>petición</b>.</div>
+  </header>
+
+  <main class="grid">
+    <section class="card">
+      <h2>Parámetros</h2>
+      <div class="body">
+        <div class="row">
+          <div>
+            <label>Procesos (n)</label>
+            <input id="nProc" type="number" min="1" value="5" />
+          </div>
+          <div>
+            <label>Recursos (m)</label>
+            <input id="nRes" type="number" min="1" value="3" />
+          </div>
+        </div>
+
+        <div class="row">
+          <div>
+            <label>Max (n×m) — filas por línea, separado por comas</label>
+            <textarea id="maxTxt" class="mono"></textarea>
+            <div class="hint">Ejemplo (5×3):<br>7,5,3\n3,2,2\n9,0,2\n2,2,2\n4,3,3</div>
+          </div>
+          <div>
+            <label>Asignado / Allocation (n×m)</label>
+            <textarea id="allocTxt" class="mono"></textarea>
+            <div class="hint">Ejemplo (5×3):<br>0,1,0\n2,0,0\n3,0,2\n2,1,1\n0,0,2</div>
+          </div>
+        </div>
+
+        <div>
+          <label>Disponible / Available (m)</label>
+          <input id="availTxt" class="mono" value="3,3,2" />
+          <div class="hint">Ejemplo (3): 3,3,2</div>
+        </div>
+
+        <div class="btns">
+          <button class="ghost" id="btnEjemplo">Cargar ejemplo clásico</button>
+          <button class="primary" id="btnCalcular">Calcular seguridad</button>
+          <button class="warn" id="btnNeed">Mostrar matriz Need</button>
+          <button class="ghost" id="btnLimpiar">Limpiar</button>
+        </div>
+      </div>
+    </section>
+
+    <section class="card">
+      <h2>Simular Petición (Request)</h2>
+      <div class="body">
+        <div class="row">
+          <div>
+            <label>Proceso</label>
+            <input id="pIdx" type="number" min="0" value="1" />
+          </div>
+          <div>
+            <label>Request (m) — vector</label>
+            <input id="reqTxt" class="mono" value="1,0,2" />
+          </div>
+        </div>
+        <div class="btns">
+          <button class="ok" id="btnRequest">Probar petición</button>
+        </div>
+        <div class="hint" style="margin-top:8px">Se aplica el algoritmo del banquero: verifica <span class="pill">Request ≤ Need</span> y <span class="pill">Request ≤ Available</span>, luego <i>estado seguro</i>.</div>
+      </div>
+    </section>
+
+    <section class="card" style="grid-column:1/-1">
+      <h2>Resultados</h2>
+      <div class="body">
+        <div id="statusLine" class="pill" style="margin-bottom:12px">Estado: <span id="estado" class="muted" style="margin-left:6px">—</span></div>
+
+        <div class="stack">
+          <div>
+            <strong>Secuencia segura:</strong>
+            <div id="seq" class="mono muted">—</div>
+          </div>
+          <div>
+            <strong>Need (Max − Allocation):</strong>
+            <div class="mono" id="needBlock">—</div>
+          </div>
+          <div>
+            <strong>Bitácora:</strong>
+            <div class="logs" id="logs">—</div>
+          </div>
+        </div>
+        <div class="footer">Tip: pega matrices desde Excel/CSV. Usa <span class="kbd">Ctrl</span>+<span class="kbd">Enter</span> en los campos para calcular rápido.</div>
+      </div>
+    </section>
+  </main>
+
+  <script>
+    const $ = sel => document.querySelector(sel);
+    const nProc = $('#nProc');
+    const nRes  = $('#nRes');
+    const maxTxt = $('#maxTxt');
+    const allocTxt = $('#allocTxt');
+    const availTxt = $('#availTxt');
+
+    const estado = $('#estado');
+    const seq = $('#seq');
+    const needBlock = $('#needBlock');
+    const logs = $('#logs');
+
+    const statusLine = $('#statusLine');
+
+    function parseMatrix(text, rows, cols){
+      const lines = text.trim().split(/\n+/).filter(Boolean);
+      if(lines.length !== rows) throw new Error(`Se esperaban ${rows} filas, recibidas ${lines.length}.`);
+      const M = lines.map((ln, i)=>{
+        const vals = ln.split(/[,\s]+/).filter(Boolean).map(Number);
+        if(vals.length !== cols) throw new Error(`Fila ${i} debe tener ${cols} columnas.`);
+        if(vals.some(v=>!Number.isFinite(v) || v<0)) throw new Error(`Valores inválidos en fila ${i}.`);
+        return vals;
+      });
+      return M;
+    }
+
+    function parseVector(text, cols){
+      const vals = text.trim().split(/[,\s]+/).filter(Boolean).map(Number);
+      if(vals.length !== cols) throw new Error(`Vector debe tener ${cols} elementos.`);
+      if(vals.some(v=>!Number.isFinite(v) || v<0)) throw new Error(`Vector contiene valores inválidos.`);
+      return vals;
+    }
+
+    function sub(a,b){return a.map((v,i)=>v-b[i]);}
+    function add(a,b){return a.map((v,i)=>v+b[i]);}
+    function leq(a,b){return a.every((v,i)=>v<=b[i]);}
+
+    function computeNeed(Max,Alloc){
+      const n = Max.length, m = Max[0].length;
+      const Need = Array.from({length:n},()=>Array(m).fill(0));
+      for(let i=0;i<n;i++) for(let j=0;j<m;j++){
+        if(Max[i][j] < Alloc[i][j]) throw new Error(`Max[${i},${j}] < Allocation[${i},${j}]`);
+        Need[i][j] = Max[i][j] - Alloc[i][j];
+      }
+      return Need;
+    }
+
+    function safety(Max,Alloc,Avail,log=true){
+      const n=Max.length, m=Max[0].length;
+      const Need = computeNeed(Max,Alloc);
+      let Work = Avail.slice();
+      const Finish = Array(n).fill(false);
+      const seq = [];
+      let changed=true;
+      let steps = [];
+      while(changed){
+        changed = false;
+        for(let i=0;i<n;i++){
+          if(!Finish[i] && leq(Need[i],Work)){
+            steps.push(`Proceso P${i} puede ejecutarse (Need[${i}] ≤ Work). Work := Work + Allocation[${i}] → [${add(Work,Alloc[i])}]`);
+            Work = add(Work,Alloc[i]);
+            Finish[i] = true;
+            seq.push(i);
+            changed = true;
+          }
+        }
+      }
+      const safe = Finish.every(Boolean);
+      if(!safe){
+        const pending = Finish.map((f,i)=>!f?`P${i}`:null).filter(Boolean).join(', ');
+        steps.push(`No se puede avanzar más. Procesos pendientes: ${pending}`);
+      }
+      return {safe, seq, Need, steps};
+    }
+
+    function renderMatrix(M){
+      if(M==='—') return '—';
+      return M.map(r=>r.join(' ')).join('\n');
+    }
+
+    function renderNeed(M){
+      if(!Array.isArray(M)) return '—';
+      const rows = M.map(r=>`<tr>${r.map(v=>`<td>${v}</td>`).join('')}</tr>`).join('');
+      const head = `<tr>${M[0].map((_,j)=>`<th>R${j}</th>`).join('')}</tr>`;
+      return `<table class="table"><thead>${head}</thead><tbody>${rows}</tbody></table>`;
+    }
+
+    function setStatus(ok, text){
+      estado.textContent = text;
+      statusLine.style.borderColor = ok? 'var(--ok)' : 'var(--err)';
+      statusLine.style.boxShadow = ok? '0 0 0 1px rgba(16,185,129,.25) inset' : '0 0 0 1px rgba(239,68,68,.25) inset';
+    }
+
+    function getInputs(){
+      const n = Number(nProc.value|0), m = Number(nRes.value|0);
+      if(n<1||m<1) throw new Error('n y m deben ser ≥ 1');
+      const Max = parseMatrix(maxTxt.value, n, m);
+      const Alloc = parseMatrix(allocTxt.value, n, m);
+      const Avail = parseVector(availTxt.value, m);
+      return {n,m,Max,Alloc,Avail};
+    }
+
+    function calculate(){
+      try{
+        const {Max,Alloc,Avail} = getInputs();
+        const res = safety(Max,Alloc,Avail);
+        needBlock.innerHTML = renderNeed(res.Need);
+        seq.textContent = res.seq.length? res.seq.map(i=>`P${i}`).join(' → ') : '—';
+        logs.textContent = res.steps.join('\n');
+        setStatus(res.safe, res.safe? 'SEGURO' : 'NO SEGURO');
+      }catch(e){
+        setStatus(false, 'ERROR');
+        logs.textContent = String(e.message||e);
+        needBlock.textContent = '—';
+        seq.textContent = '—';
+      }
+    }
+
+    function showNeed(){
+      try{
+        const {Max,Alloc} = getInputs();
+        const Need = computeNeed(Max,Alloc);
+        needBlock.innerHTML = renderNeed(Need);
+        setStatus(true,'—');
+        logs.textContent = 'Matriz Need calculada correctamente.';
+      }catch(e){
+        setStatus(false,'ERROR');
+        logs.textContent = String(e.message||e);
+      }
+    }
+
+    function tryRequest(){
+      try{
+        const {Max,Alloc,Avail} = getInputs();
+        const p = Number($('#pIdx').value|0);
+        const m = Avail.length;
+        if(p<0 || p>=Max.length) throw new Error('Índice de proceso fuera de rango.');
+        const Req = parseVector($('#reqTxt').value, m);
+        const Need = computeNeed(Max,Alloc);
+        if(!leq(Req,Need[p])) throw new Error(`Request ≤ Need no se cumple para P${p}.`);
+        if(!leq(Req,Avail)) throw new Error(`Request ≤ Available no se cumple. Disponible: [${Avail}]`);
+
+        // Asignación tentativa
+        const Av2 = sub(Avail,Req);
+        const Al2 = Alloc.map(r=>r.slice());
+        const Ne2 = Need.map(r=>r.slice());
+        for(let j=0;j<m;j++){ Al2[p][j]+=Req[j]; Ne2[p][j]-=Req[j]; }
+
+        const res = safety(Max,Al2,Av2);
+        needBlock.innerHTML = renderNeed(res.Need);
+        seq.textContent = res.seq.length? res.seq.map(i=>`P${i}`).join(' → ') : '—';
+        const granted = res.safe;
+        setStatus(granted, granted? 'PETICIÓN CONCEDIDA (estado seguro)' : 'PETICIÓN DENEGADA (estado no seguro)');
+        logs.textContent = [
+          `Probando Request de P${p}: [${Req}]`,
+          `Verificaciones: Request ≤ Need ✓, Request ≤ Available ✓`,
+          ...res.steps
+        ].join('\n');
+      }catch(e){
+        setStatus(false,'ERROR');
+        logs.textContent = String(e.message||e);
+      }
+    }
+
+    function loadExample(){
+      nProc.value = 5; nRes.value = 3;
+      maxTxt.value = ['7,5,3','3,2,2','9,0,2','2,2,2','4,3,3'].join('\n');
+      allocTxt.value = ['0,1,0','2,0,0','3,0,2','2,1,1','0,0,2'].join('\n');
+      availTxt.value = '3,3,2';
+      $('#pIdx').value = 1; $('#reqTxt').value = '1,0,2';
+      logs.textContent = 'Ejemplo cargado. Presiona “Calcular seguridad” o “Probar petición”.';
+      needBlock.textContent = '—'; seq.textContent = '—'; setStatus(true,'—');
+    }
+
+    function clearAll(){
+      maxTxt.value = '';
+      allocTxt.value = '';
+      availTxt.value = '';
+      needBlock.textContent = '—'; seq.textContent = '—'; logs.textContent = '—';
+      setStatus(true,'—');
+    }
+
+    // Hotkeys: Ctrl+Enter calcula
+    [maxTxt,allocTxt,availTxt].forEach(el=>{
+      el.addEventListener('keydown', (e)=>{
+        if(e.key==='Enter' && e.ctrlKey){ e.preventDefault(); calculate(); }
+      });
+    });
+
+    $('#btnCalcular').addEventListener('click', calculate);
+    $('#btnNeed').addEventListener('click', showNeed);
+    $('#btnRequest').addEventListener('click', tryRequest);
+    $('#btnEjemplo').addEventListener('click', loadExample);
+    $('#btnLimpiar').addEventListener('click', clearAll);
+
+    // Inicializa con ejemplo por defecto
+    loadExample();
+  </script>
+</body>
+</html>
